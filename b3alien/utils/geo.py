@@ -24,13 +24,23 @@ def to_geoparquet(csvFile, geoFile, leftID='eqdcellcode', rightID='cellCode', ex
         A GeoParquet file at the location of exportPath
     """
 
-    data = pd.read_csv(csvFile, sep='\t')
-    geoRef = gpd.read_file(geoFile, engine='pyogrio', use_arrow=True, crs="EPSG:4326")
+    # Read tab-separated CSV, keep key as string to preserve leading zeros
+    data = pd.read_csv(csvFile, sep="\t", dtype={leftID: "string"})
+    data[leftID] = data[leftID].str.strip()
 
-    test_merge = pd.merge(data, qdgc_ref, left_on=leftID, right_on=rightID)
+    # Read the GeoPackage (no crs= here)
+    geoRef = gpd.read_file(geoFile, engine="pyogrio", use_arrow=True)
 
-    gdf = gpd.GeoDataFrame(test_merge, geometry='geometry')
-    if gdf.crs is None:
-        gdf.set_crs(crs, inplace=True) 
+    # If the layer has no CRS and you KNOW it should be WGS84, set it explicitly
+    if geoRef.crs is None:
+        geoRef = geoRef.set_crs(4326)
 
-    gdf.to_parquet(exportPath, engine="pyarrow", index=False)
+    # Ensure join key is string and trimmed
+    geoRef[rightID] = geoRef[rightID].astype("string").str.strip()
+
+    # ✅ Merge DATAFRAMES, not strings
+    merged = pd.merge(data, geoRef, left_on=leftID, right_on=rightID, how="inner")
+
+    # Build GeoDataFrame and write Parquet
+    gdf = gpd.GeoDataFrame(merged, geometry="geometry", crs=geoRef.crs)
+    gdf.to_parquet(exportPath, index=False)
